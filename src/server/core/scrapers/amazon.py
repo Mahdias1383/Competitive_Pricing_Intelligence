@@ -10,59 +10,36 @@ from src.common.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-def bypass_interstitial(driver):
-    """
-    Handles Amazon error pages (Captcha/Something went wrong).
-    """
-    try:
-        page_source = driver.page_source.lower()
-        
-        # Check based on 'error_page.html' analysis
-        is_blocked = (
-            "robot check" in driver.title.lower() or 
-            "type the characters" in page_source or
-            "opfcaptcha" in page_source or
-            "something went wrong" in page_source
-        )
-        
-        if is_blocked:
-            logger.warning("[AMAZON] Blocked. Attempting bypass...")
-            
-            # Try reloading first
-            driver.refresh()
-            time.sleep(random.uniform(3.0, 5.0))
-            
-            # If still blocked, look for 'Continue' buttons
-            try:
-                # Some error pages have a "Try different image" or "Continue"
-                buttons = driver.find_elements(By.XPATH, "//button | //a[contains(@href, 'home')]")
-                if buttons:
-                    # Random interaction
-                    pass 
-            except: pass
-            
-            return True
-    except: pass
-    return False
-
-def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]]) -> None:
+def setup_stealth_driver():
     options = Options()
+    # options.add_argument('--headless')
     options.add_argument('--disable-gpu')
     options.add_argument("--log-level=3")
+    options.add_argument("--window-size=1366,768")
+    
+    # Anti-Bot Flags
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
     options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
+    return webdriver.Chrome(options=options)
+
+def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]]) -> None:
     while not queue.empty():
         url = queue.get()
-        driver = webdriver.Chrome(options=options)
+        driver = setup_stealth_driver()
         try:
             driver.get(url)
-            time.sleep(random.uniform(2.0, 4.0))
+            time.sleep(random.uniform(2.5, 5.0))
             
-            bypass_interstitial(driver)
-            
+            # Check for Captcha/Block
+            if "type the characters" in driver.page_source.lower():
+                logger.warning(f"[AMAZON] Blocked on product: {url[-15:]}")
+                # Simple retry logic: Refresh
+                driver.refresh()
+                time.sleep(4)
+
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
             title_tag = soup.find("span", {"id": "productTitle"})
@@ -70,6 +47,7 @@ def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]
             
             price_usd = 0.0
             
+            # Optimized Price Logic
             price_elements = soup.select(".a-price .a-offscreen")
             for p in price_elements:
                 text = p.get_text().strip().replace("$", "").replace(",", "")
