@@ -37,12 +37,13 @@ def start_client_app() -> None:
         print(f"\nReport Saved: {report_path}")
         if os.path.exists(report_path):
             df = pd.read_csv(report_path)
-            # Update to match new columns
             print("\n--- Top 5 Deals ---")
-            if 'product_name' in df.columns:
-                print(df[['product_name', 'final_price', 'source']].head(5))
+            # Show name, price and source. Link is in CSV but too long for simple print
+            cols_to_show = [c for c in ['product_name', 'final_price', 'source'] if c in df.columns]
+            if cols_to_show:
+                print(df[cols_to_show].head(5))
             else:
-                print("Columns mismatch in report.")
+                print("Data format unexpected.")
 
         client.send("ACK".encode(ENCODING))
         

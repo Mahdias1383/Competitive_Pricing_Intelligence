@@ -29,16 +29,15 @@ def analyze_purchase_options() -> str:
 
     current_rate = get_current_usd_rate()
 
-    # Process Amazon (Input: final_price is USD)
+    # Process Amazon
     if not df_amazon.empty and 'final_price' in df_amazon.columns:
-        # Convert USD -> IRR (Landed Cost)
         df_amazon['final_price_irr'] = df_amazon['final_price'].apply(lambda x: calculate_landed_cost(x, current_rate))
         df_amazon['source'] = 'Amazon (Imported)'
         df_amazon['original_price_display'] = df_amazon['final_price'].map('${:,.2f}'.format)
     else:
         df_amazon = pd.DataFrame()
 
-    # Process Digikala (Input: final_price is IRR)
+    # Process Digikala
     if not df_digikala.empty and 'final_price' in df_digikala.columns:
         df_digikala['final_price_irr'] = df_digikala['final_price']
         df_digikala['source'] = 'Digikala (Domestic)'
@@ -52,13 +51,18 @@ def analyze_purchase_options() -> str:
 
     df_final = df_final.sort_values(by='final_price_irr')
     
-    # Create Final Standard Report
+    # Generate Final Report with Links
     export_df = pd.DataFrame()
     export_df['product_name'] = df_final['product_name']
     export_df['source'] = df_final['source']
-    export_df['final_price'] = df_final['final_price_irr'] # Calculated IRR
+    export_df['final_price'] = df_final['final_price_irr']
     export_df['original_price'] = df_final['original_price_display']
-    export_df['product_link'] = df_final['product_link']
+    
+    # Ensure link column matches
+    if 'product_link' in df_final.columns:
+        export_df['product_link'] = df_final['product_link']
+    else:
+        export_df['product_link'] = "N/A"
 
     output_path = DATA_DIR / FINAL_CSV_NAME
     export_df.to_csv(output_path, index=False, encoding='utf-8-sig')
@@ -75,7 +79,6 @@ def generate_comparison_plot() -> Optional[str]:
         df = pd.read_csv(final_path)
         if df.empty: return None
 
-        # Use 'final_price' column which is now the calculated IRR
         summary = df.groupby('source')['final_price'].mean()
         if summary.empty: return None
         

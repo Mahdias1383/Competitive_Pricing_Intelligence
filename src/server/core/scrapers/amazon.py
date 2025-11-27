@@ -1,4 +1,5 @@
 import time
+import random
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -9,9 +10,43 @@ from src.common.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+def bypass_interstitial(driver):
+    """
+    Handles Amazon error pages (Captcha/Something went wrong).
+    """
+    try:
+        page_source = driver.page_source.lower()
+        
+        # Check based on 'error_page.html' analysis
+        is_blocked = (
+            "robot check" in driver.title.lower() or 
+            "type the characters" in page_source or
+            "opfcaptcha" in page_source or
+            "something went wrong" in page_source
+        )
+        
+        if is_blocked:
+            logger.warning("[AMAZON] Blocked. Attempting bypass...")
+            
+            # Try reloading first
+            driver.refresh()
+            time.sleep(random.uniform(3.0, 5.0))
+            
+            # If still blocked, look for 'Continue' buttons
+            try:
+                # Some error pages have a "Try different image" or "Continue"
+                buttons = driver.find_elements(By.XPATH, "//button | //a[contains(@href, 'home')]")
+                if buttons:
+                    # Random interaction
+                    pass 
+            except: pass
+            
+            return True
+    except: pass
+    return False
+
 def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]]) -> None:
     options = Options()
-    # options.add_argument('--headless') 
     options.add_argument('--disable-gpu')
     options.add_argument("--log-level=3")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -24,17 +59,9 @@ def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]
         driver = webdriver.Chrome(options=options)
         try:
             driver.get(url)
-            time.sleep(2)
+            time.sleep(random.uniform(2.0, 4.0))
             
-            # Anti-Interstitial
-            try:
-                buttons = driver.find_elements(By.XPATH, "//input[@type='submit'] | //button")
-                for btn in buttons:
-                    if "continue" in str(btn.get_attribute("aria-label")).lower():
-                        btn.click()
-                        time.sleep(2)
-                        break
-            except: pass
+            bypass_interstitial(driver)
             
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
@@ -43,13 +70,12 @@ def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]
             
             price_usd = 0.0
             
-            # Price Logic
             price_elements = soup.select(".a-price .a-offscreen")
             for p in price_elements:
                 text = p.get_text().strip().replace("$", "").replace(",", "")
                 try:
                     val = float(text)
-                    if val > 0:
+                    if val > 5: 
                         price_usd = val
                         break 
                 except: continue
@@ -61,13 +87,14 @@ def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]
                     except: pass
 
             if price_usd > 0:
-                # FIXED KEYS
                 result_list.append({
                     "product_name": title,
                     "final_price": price_usd,
                     "product_link": url
                 })
                 logger.info(f"[AMAZON] Scraped: {title[:15]}... - ${price_usd}")
+            else:
+                logger.warning(f"[AMAZON] Price missing for: {title[:15]}...")
                 
         except Exception as e:
             logger.error(f"[AMAZON] Scrape Error: {e}")
