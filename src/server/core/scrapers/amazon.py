@@ -14,8 +14,6 @@ def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]
     # options.add_argument('--headless') 
     options.add_argument('--disable-gpu')
     options.add_argument("--log-level=3")
-    
-    # Stealth Settings
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -28,14 +26,11 @@ def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]
             driver.get(url)
             time.sleep(2)
             
-            # --- Anti-Interstitial Logic (Clicking 'Continue' buttons) ---
+            # Anti-Interstitial
             try:
-                # Check for common interstitial buttons (Try different XPaths)
                 buttons = driver.find_elements(By.XPATH, "//input[@type='submit'] | //button")
                 for btn in buttons:
-                    # If button text or ID suggests 'Continue' or 'Accept'
-                    if "continue" in btn.get_attribute("aria-label").lower() or "continue" in btn.text.lower():
-                        logger.info("[AMAZON] Interstitial detected. Clicking Continue...")
+                    if "continue" in str(btn.get_attribute("aria-label")).lower():
                         btn.click()
                         time.sleep(2)
                         break
@@ -48,10 +43,7 @@ def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]
             
             price_usd = 0.0
             
-            # --- Optimized Price Logic based on your HTML ---
-            # Priority 1: The 'a-offscreen' span inside 'corePriceDisplay' or similar
-            # This contains the full text like "$198.00" hidden from view but present in DOM.
-            
+            # Price Logic
             price_elements = soup.select(".a-price .a-offscreen")
             for p in price_elements:
                 text = p.get_text().strip().replace("$", "").replace(",", "")
@@ -59,27 +51,23 @@ def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]
                     val = float(text)
                     if val > 0:
                         price_usd = val
-                        break # Found the main price
+                        break 
                 except: continue
             
-            # Priority 2: Apex Price (Deals)
             if price_usd == 0:
                 apex = soup.select_one("span.apexPriceToPay span.a-offscreen")
                 if apex:
-                    try:
-                        price_usd = float(apex.get_text().replace("$", "").replace(",", ""))
+                    try: price_usd = float(apex.get_text().replace("$", "").replace(",", ""))
                     except: pass
 
             if price_usd > 0:
-                # Standardized Output Structure
+                # FIXED KEYS
                 result_list.append({
                     "product_name": title,
-                    "final_price": price_usd, # USD
+                    "final_price": price_usd,
                     "product_link": url
                 })
-                logger.info(f"[AMAZON] Scraped: {title[:20]}... - ${price_usd}")
-            else:
-                logger.warning(f"[AMAZON] No valid price found: {title[:20]}...")
+                logger.info(f"[AMAZON] Scraped: {title[:15]}... - ${price_usd}")
                 
         except Exception as e:
             logger.error(f"[AMAZON] Scrape Error: {e}")

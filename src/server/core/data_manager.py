@@ -1,7 +1,3 @@
-"""
-Data Manager Module.
-"""
-
 import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Any
@@ -16,19 +12,19 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 def save_scraped_data_to_csv(data: List[Dict[str, Any]], filename: str) -> None:
     file_path = DATA_DIR / filename
     
-    # Standard Columns
+    # EXACT REQUIRED COLUMNS
     cols = ['product_name', 'final_price', 'product_link']
 
     if not data:
-        logger.warning(f"[DATA] No data to save for {filename}. Creating empty file.")
+        logger.warning(f"[DATA] No data for {filename}. Creating empty file.")
         df = pd.DataFrame(columns=cols)
     else:
         df = pd.DataFrame(data)
-        # Ensure only expected columns exist (and in order)
-        # Fill missing columns if any
+        # Fill missing keys if any
         for c in cols:
             if c not in df.columns:
                 df[c] = ""
+        # Reorder and filter columns
         df = df[cols]
 
     try:

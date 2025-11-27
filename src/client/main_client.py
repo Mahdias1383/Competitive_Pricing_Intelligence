@@ -1,7 +1,3 @@
-"""
-Client App (Comparison Mode).
-"""
-
 import socket
 import sys
 import os
@@ -23,26 +19,30 @@ def start_client_app() -> None:
     
     if not query: return
 
-    # Simplified payload, we always check both sites now
     payload = {"query": query}
-    
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    
     try:
         client.connect((SERVER_HOST, SERVER_PORT))
         client.send(json.dumps(payload).encode(ENCODING))
         
         print(f"\n[SERVER] {client.recv(BUFFER_SIZE).decode(ENCODING)}")
-        print("Gathering data from Digikala & Amazon (20 items each)... Please wait.\n")
+        print("Gathering data... (This takes about 60-90 seconds)\n")
         
         report_path = client.recv(BUFFER_SIZE).decode(ENCODING)
         if "ERROR" in report_path:
-            print("Server Failed.")
+            print(f"Server Error: {report_path}")
             return
 
         print(f"\nReport Saved: {report_path}")
         if os.path.exists(report_path):
             df = pd.read_csv(report_path)
-            print(df[['name_product', 'final_price', 'source']].head(5))
+            # Update to match new columns
+            print("\n--- Top 5 Deals ---")
+            if 'product_name' in df.columns:
+                print(df[['product_name', 'final_price', 'source']].head(5))
+            else:
+                print("Columns mismatch in report.")
 
         client.send("ACK".encode(ENCODING))
         

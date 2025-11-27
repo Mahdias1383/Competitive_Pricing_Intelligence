@@ -21,7 +21,7 @@ def scrape_digikala_product_details(queue: Queue, result_list: List[Dict[str, An
         driver = webdriver.Chrome(options=options)
         try:
             driver.get(url)
-            time.sleep(4)
+            time.sleep(3)
             
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
@@ -30,7 +30,7 @@ def scrape_digikala_product_details(queue: Queue, result_list: List[Dict[str, An
             
             price_irr = 0.0
             
-            # 1. JSON-LD Strategy (Best)
+            # JSON-LD Strategy
             scripts = soup.find_all('script', type='application/ld+json')
             for script in scripts:
                 try:
@@ -40,23 +40,18 @@ def scrape_digikala_product_details(queue: Queue, result_list: List[Dict[str, An
                             if item.get('@type') == 'Product':
                                 data = item
                                 break
-                    
                     if data.get('@type') == 'Product':
                         offers = data.get('offers', {})
                         if isinstance(offers, list): offers = offers[0]
-                        
                         price_val = offers.get('price')
                         if price_val:
-                            # Check currency logic
                             if offers.get('priceCurrency') == 'IRR':
                                 price_irr = float(price_val)
                             else:
-                                # Assume Toman if not IRR explicit, convert to IRR
                                 price_irr = float(price_val) * 10
                             break
                 except: continue
 
-            # 2. Meta Tag Fallback
             if price_irr == 0:
                 meta_price = soup.find("meta", property="product:price:amount")
                 if meta_price and meta_price.get("content"):
@@ -64,15 +59,13 @@ def scrape_digikala_product_details(queue: Queue, result_list: List[Dict[str, An
                     except: pass
 
             if price_irr > 100_000:
-                # Standardized Output Structure
+                # FIXED KEYS
                 result_list.append({
                     "product_name": title,
-                    "final_price": price_irr, # Rial
+                    "final_price": price_irr,
                     "product_link": url
                 })
-                logger.info(f"[DIGIKALA] Scraped: {title[:20]}... - {price_irr:,.0f} IRR")
-            else:
-                logger.warning(f"[DIGIKALA] Price not found/valid for: {title[:20]}...")
+                logger.info(f"[DIGIKALA] Scraped: {title[:15]}... - {price_irr:,.0f} IRR")
             
         except Exception as e:
             logger.error(f"[DIGIKALA] Scrape Error: {e}")
