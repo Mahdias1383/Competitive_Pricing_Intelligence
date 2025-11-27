@@ -1,26 +1,38 @@
-from queue import Queue
-from typing import Optional
-from config.menu_urls import CRAWLER_TARGETS
+"""
+Utility functions for the server core.
+Currently handles translation services.
+"""
 
-def create_url_queue(crawler_name: str) -> Queue:
+from deep_translator import GoogleTranslator
+from src.common.logger import setup_logger
+
+logger = setup_logger(__name__)
+
+def translate_to_english(text: str) -> str:
     """
-    Creates and populates a FIFO (First-In-First-Out) Queue with URLs for a specific crawler.
-
-    Args:
-        crawler_name (str): The key name of the website (e.g., 'digikala', 'amazon').
-
-    Returns:
-        Queue: A queue containing all URLs to be scraped. 
-               Returns an empty queue if the crawler_name is invalid.
-    """
-    if crawler_name not in CRAWLER_TARGETS:
-        print(f"[ERROR] Crawler target '{crawler_name}' not found in configuration.")
-        return Queue()
-        
-    url_queue = Queue()
-    urls_dict = CRAWLER_TARGETS[crawler_name]
+    Translates Persian text to English automatically.
+    Used for creating compatible search queries for Amazon.
     
-    for key, url in urls_dict.items():
-        url_queue.put(url)
+    Args:
+        text (str): The input text (e.g., 'اسپرسوساز')
         
-    return url_queue
+    Returns:
+        str: Translated text (e.g., 'Espresso Maker') or original text if failed.
+    """
+    if not text:
+        return ""
+
+    # Check if text contains Persian characters (Basic range check)
+    has_persian = any("\u0600" <= char <= "\u06FF" for char in text)
+    
+    if not has_persian:
+        return text
+
+    try:
+        # logger.info(f"Translating query '{text}' to English...") # Optional verbosity
+        translated = GoogleTranslator(source='auto', target='en').translate(text)
+        logger.info(f"[TRANSLATE] '{text}' -> '{translated}'")
+        return translated
+    except Exception as e:
+        logger.warning(f"[TRANSLATE] Failed: {e}. Using original query.")
+        return text

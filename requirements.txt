@@ -4,3 +4,4 @@ beautifulsoup4
 requests
 matplotlib
 farsi-tools
+deep-translator

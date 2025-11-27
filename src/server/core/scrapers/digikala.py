@@ -1,73 +1,80 @@
+import json
+import time
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
 from bs4 import BeautifulSoup
 from queue import Queue
 from typing import List, Dict, Any
+from src.common.logger import setup_logger
 
-from config.settings import PAGE_LOAD_TIMEOUT
-
-def _setup_driver() -> webdriver.Chrome:
-    """Configures and returns a headless Chrome driver."""
-    options = Options()
-    # options.add_argument('--headless')  # Uncomment to run without UI
-    options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    return webdriver.Chrome(options=options)
+logger = setup_logger(__name__)
 
 def scrape_digikala_product_details(queue: Queue, result_list: List[Dict[str, Any]]) -> None:
-    """
-    Main worker function for Digikala scraping using Selenium with Explicit Waits.
-    """
+    options = Options()
+    # options.add_argument('--headless') 
+    options.add_argument('--disable-gpu')
+    options.add_argument("--log-level=3")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+    
     while not queue.empty():
         url = queue.get()
-        driver = _setup_driver()
-        
+        driver = webdriver.Chrome(options=options)
         try:
-            print(f"[DIGIKALA] Navigating to: {url}...")
             driver.get(url)
+            time.sleep(4)
             
-            # Smart Wait: Wait until the H1 tag (title) is present
-            try:
-                WebDriverWait(driver, PAGE_LOAD_TIMEOUT).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "h1"))
-                )
-            except TimeoutException:
-                print(f"[DIGIKALA] Timeout waiting for page load: {url}")
-            
-            # Pass HTML to BeautifulSoup for faster parsing than Selenium
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
-            # Extract Title
             title_tag = soup.find("h1")
-            title = title_tag.get_text().strip() if title_tag else "عنوان محصول یافت نشد"
+            title = title_tag.get_text().strip() if title_tag else "Unknown Digikala Product"
             
-            # Extract Price (Digikala class names change often, try to be generic or use specific classes)
-            # Based on user's provided selector:
-            # class="text-h4 ml-1 text-neutral-800" (Check if this still works, usually regex is safer for classes)
-            price = 0.0
-            price_tag = soup.find("span", class_=lambda x: x and "text-neutral-800" in x)
+            price_irr = 0.0
             
-            if price_tag:
+            # 1. JSON-LD Strategy (Best)
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
                 try:
-                    price_text = price_tag.get_text().strip().replace(",", "")
-                    price = float(price_text)
-                except ValueError:
-                    price = 0.0
-            
-            product_data = {
-                "name_product": title,
-                "price_product": price
-            }
-            
-            result_list.append(product_data)
-            print(f"[DIGIKALA] Scraped: {product_data['name_product']} - {product_data['price_product']}")
+                    data = json.loads(script.string)
+                    if isinstance(data, list):
+                        for item in data:
+                            if item.get('@type') == 'Product':
+                                data = item
+                                break
+                    
+                    if data.get('@type') == 'Product':
+                        offers = data.get('offers', {})
+                        if isinstance(offers, list): offers = offers[0]
+                        
+                        price_val = offers.get('price')
+                        if price_val:
+                            # Check currency logic
+                            if offers.get('priceCurrency') == 'IRR':
+                                price_irr = float(price_val)
+                            else:
+                                # Assume Toman if not IRR explicit, convert to IRR
+                                price_irr = float(price_val) * 10
+                            break
+                except: continue
 
+            # 2. Meta Tag Fallback
+            if price_irr == 0:
+                meta_price = soup.find("meta", property="product:price:amount")
+                if meta_price and meta_price.get("content"):
+                    try: price_irr = float(meta_price["content"])
+                    except: pass
+
+            if price_irr > 100_000:
+                # Standardized Output Structure
+                result_list.append({
+                    "product_name": title,
+                    "final_price": price_irr, # Rial
+                    "product_link": url
+                })
+                logger.info(f"[DIGIKALA] Scraped: {title[:20]}... - {price_irr:,.0f} IRR")
+            else:
+                logger.warning(f"[DIGIKALA] Price not found/valid for: {title[:20]}...")
+            
         except Exception as e:
-            print(f"[DIGIKALA] Error: {e}")
+            logger.error(f"[DIGIKALA] Scrape Error: {e}")
         finally:
             driver.quit()

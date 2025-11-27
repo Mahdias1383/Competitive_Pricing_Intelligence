@@ -1,77 +1,87 @@
-import requests
-from bs4 import BeautifulSoup, Tag
+import time
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from bs4 import BeautifulSoup
 from queue import Queue
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
+from src.common.logger import setup_logger
 
-from config.settings import USER_AGENT, CURRENCY_EXCHANGE_RATE
-
-def _get_page_content(url: str) -> Optional[str]:
-    """Fetch page content with proper headers."""
-    headers = {
-        'User-Agent': USER_AGENT,
-        'Accept-Language': 'en-US, en;q=0.5'
-    }
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            return response.content
-        print(f"[AMAZON] Failed to fetch {url} - Status: {response.status_code}")
-    except Exception as e:
-        print(f"[AMAZON] Request Error: {e}")
-    return None
-
-def _extract_title(soup: BeautifulSoup) -> str:
-    """Extract and clean product title."""
-    try:
-        title_tag = soup.find("span", {"id": "productTitle"})
-        if title_tag:
-            full_title = title_tag.get_text().strip()
-            # Clean title: keep only text before the first comma for brevity
-            return full_title.split(',')[0].strip()
-    except AttributeError:
-        pass
-    return "Unknown Amazon Product"
-
-def _extract_price(soup: BeautifulSoup) -> float:
-    """Extract price and convert to IRR."""
-    try:
-        # Amazon has multiple price classes, checking the most common ones
-        price_tag = soup.find("span", class_="a-price-whole")
-        if not price_tag:
-            price_tag = soup.find("span", class_="a-offscreen")
-        
-        if price_tag:
-            price_text = price_tag.get_text().strip()
-            # Remove currency symbols and commas
-            clean_price = price_text.replace("$", "").replace(",", "").replace(".", "")
-            
-            # If price has decimals (e.g. 19.99), the replace above might mess up if not careful.
-            # Simplified logic for integer approximation:
-            return float(clean_price) * CURRENCY_EXCHANGE_RATE
-            
-    except (ValueError, AttributeError):
-        pass
-    return 0.0
+logger = setup_logger(__name__)
 
 def scrape_amazon_product_details(queue: Queue, result_list: List[Dict[str, Any]]) -> None:
-    """
-    Main worker function for Amazon scraping.
-    Processes URLs from the queue and appends results to the shared list.
-    """
+    options = Options()
+    # options.add_argument('--headless') 
+    options.add_argument('--disable-gpu')
+    options.add_argument("--log-level=3")
+    
+    # Stealth Settings
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+    
     while not queue.empty():
         url = queue.get()
-        print(f"[AMAZON] Processing: {url}...")
-        
-        content = _get_page_content(url)
-        if not content:
-            continue
+        driver = webdriver.Chrome(options=options)
+        try:
+            driver.get(url)
+            time.sleep(2)
+            
+            # --- Anti-Interstitial Logic (Clicking 'Continue' buttons) ---
+            try:
+                # Check for common interstitial buttons (Try different XPaths)
+                buttons = driver.find_elements(By.XPATH, "//input[@type='submit'] | //button")
+                for btn in buttons:
+                    # If button text or ID suggests 'Continue' or 'Accept'
+                    if "continue" in btn.get_attribute("aria-label").lower() or "continue" in btn.text.lower():
+                        logger.info("[AMAZON] Interstitial detected. Clicking Continue...")
+                        btn.click()
+                        time.sleep(2)
+                        break
+            except: pass
+            
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            
+            title_tag = soup.find("span", {"id": "productTitle"})
+            title = title_tag.get_text().strip() if title_tag else "Unknown Amazon Product"
+            
+            price_usd = 0.0
+            
+            # --- Optimized Price Logic based on your HTML ---
+            # Priority 1: The 'a-offscreen' span inside 'corePriceDisplay' or similar
+            # This contains the full text like "$198.00" hidden from view but present in DOM.
+            
+            price_elements = soup.select(".a-price .a-offscreen")
+            for p in price_elements:
+                text = p.get_text().strip().replace("$", "").replace(",", "")
+                try:
+                    val = float(text)
+                    if val > 0:
+                        price_usd = val
+                        break # Found the main price
+                except: continue
+            
+            # Priority 2: Apex Price (Deals)
+            if price_usd == 0:
+                apex = soup.select_one("span.apexPriceToPay span.a-offscreen")
+                if apex:
+                    try:
+                        price_usd = float(apex.get_text().replace("$", "").replace(",", ""))
+                    except: pass
 
-        soup = BeautifulSoup(content, "html.parser")
-        
-        product_data = {
-            "name_product": _extract_title(soup),
-            "price_product": _extract_price(soup)
-        }
-        
-        result_list.append(product_data)
-        print(f"[AMAZON] Scraped: {product_data['name_product']} - {product_data['price_product']}")
+            if price_usd > 0:
+                # Standardized Output Structure
+                result_list.append({
+                    "product_name": title,
+                    "final_price": price_usd, # USD
+                    "product_link": url
+                })
+                logger.info(f"[AMAZON] Scraped: {title[:20]}... - ${price_usd}")
+            else:
+                logger.warning(f"[AMAZON] No valid price found: {title[:20]}...")
+                
+        except Exception as e:
+            logger.error(f"[AMAZON] Scrape Error: {e}")
+        finally:
+            driver.quit()
